@@ -1,0 +1,26 @@
+{
+  "name": "invoice-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview",
+    "firebase:emulate": "firebase emulators:start",
+    "deploy": "firebase deploy"
+  },
+  "dependencies": {
+    "firebase": "^11.6.0",
+    "firebase-admin": "^13.2.0",
+    "firebase-functions": "^6.3.2",
+    "jspdf": "^2.5.1",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.24",
+    "tailwindcss": "^3.3.2",
+    "vite": "^4.5.13"
+  }
+}

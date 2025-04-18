@@ -1,16 +1,25 @@
-import { v4 as uuidv4 } from "uuid";
 import fetch from "node-fetch";
+import { v4 as uuidv4 } from "uuid";
+import admin from "firebase-admin";
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end();
+// Firebase Admin wie oben initialisieren
+const svc = {
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+};
+if (!admin.apps.length) {
+  admin.initializeApp({ credential: admin.credential.cert(svc) });
+}
+const db = admin.firestore();
 
-  const sessionId = uuidv4();
-  const auth = Buffer.from(
-    `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_SECRET}`
-  ).toString("base64");
+const PAYPAL_API = "https://api-m.paypal.com";
+const CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
+const CLIENT_SECRET = process.env.PAYPAL_SECRET;
 
-  // PayPal Token holen
-  const tokenRes = await fetch("https://api-m.paypal.com/v1/oauth2/token", {
+async function getAccessToken() {
+  const auth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
+  const res = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
     method: "POST",
     headers: {
       Authorization: `Basic ${auth}`,
@@ -18,14 +27,33 @@ export default async function handler(req, res) {
     },
     body: "grant_type=client_credentials",
   });
-  const { access_token } = await tokenRes.json();
+  const json = await res.json();
+  return json.access_token;
+}
 
-  // Order anlegen
-  const orderRes = await fetch("https://api-m.paypal.com/v2/checkout/orders", {
+export default async function handler(req, res) {
+  // CORS
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    return res.status(200).end();
+  }
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  const { uid } = req.body;
+  if (req.method !== "POST" || !uid) {
+    return res.status(400).json({ error: "Invalid request" });
+  }
+
+  const sessionId = uuidv4();
+  // PayPal Order anlegen
+  const token = await getAccessToken();
+  const orderRes = await fetch(`${PAYPAL_API}/v2/checkout/orders`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${access_token}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
       intent: "CAPTURE",
@@ -36,12 +64,16 @@ export default async function handler(req, res) {
         },
       ],
       application_context: {
-        return_url: `${process.env.SITE_URL}/?session_id=${sessionId}`,
-        cancel_url: process.env.SITE_URL,
+        return_url: `${process.env.VERCEL_URL}/?session_id=${sessionId}`,
+        cancel_url: `${process.env.VERCEL_URL}`,
       },
     }),
   });
   const order = await orderRes.json();
-  const approve = order.links.find((l) => l.rel === "approve")?.href;
-  return res.json({ url: approve, sessionId, orderId: order.id });
+  const approve = order.links.find((l) => l.rel === "approve").href;
+
+  // Session in Firestore anlegen
+  await db.collection("sessions").doc(sessionId).set({ paid: false, uid });
+
+  res.json({ url: approve, orderId: sessionId });
 }
